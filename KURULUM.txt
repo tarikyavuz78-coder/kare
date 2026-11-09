@@ -1,0 +1,18 @@
+KARE – KURULUM
+
+WEB SİTESİNİ GÜNCELLEMEK
+1. kare-web.zip dosyasına sağ tıkla > Tümünü ayıkla.
+2. app.netlify.com > magnificent-cheesecake projesi > Deploys sekmesi.
+3. Çıkan kare-web klasörünü sayfanın altındaki "Drag and drop" kutusuna sürükle.
+   Adres: https://magnificent-cheesecake-e3d907.netlify.app
+
+ANDROID UYGULAMASI (APK)
+1. Bir kez kur: Node.js LTS (nodejs.org) ve Android Studio (developer.android.com/studio).
+   Android Studio'yu kurduktan sonra bir kez aç ve ilk kurulum sihirbazını bitir.
+2. Bu klasördeki APK-OLUSTUR.bat dosyasına çift tıkla. Siyah pencere işini bitirene kadar bekle.
+3. Bitince bu klasörde Kare.apk oluşur. Telefona gönder (USB, WhatsApp ya da Drive),
+   dosyaya dokun, "bilinmeyen kaynaklar" uyarısında izin ver.
+
+Bir hata çıkarsa pencerenin ekran görüntüsünü Claude'a gönder.
+
+iOS: Mac ve Apple Developer hesabı (yıllık 99 $) gerekir; sırası gelince birlikte yapılacak.
