@@ -121,6 +121,8 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const [selId, setSelId] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ src: DragSrc; card: C | null; x: number; y: number } | null>(null);
   const pending = useRef<{ src: DragSrc; card: C | null; x0: number; y0: number; moved: boolean } | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => { if (!mine.cift) setShowAll(false); }, [mine.cift, s.handNo]);
   const [modal, setModal] = useState<null | 'cift' | 'leave' | 'score' | 'chat'>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const width = useWidth(rootRef);
@@ -154,8 +156,8 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const th = thresholds(s as GameState);
 
   // ölçüler: ıstaka iki yanındaki büyük düğmelerle tüm genişliği kaplar
-  const bigBtn = compact ? 66 : 112;
-  const cw = width ? Math.max(28, Math.min(compact ? 40 : 74, Math.floor((width - 2 * bigBtn - 24 - 16 - 39) / 14))) : compact ? 40 : 64;
+  const bigBtn = compact ? 70 : 120;
+  const cw = width ? Math.max(28, Math.min(compact ? 40 : 74, Math.floor((width - bigBtn - 16 - 16 - 39) / 14))) : compact ? 40 : 64;
   const ch = Math.round(cw * 1.3);
   const labelH = compact ? 11 : 15;
   const pileW = compact ? 30 : 46;
@@ -319,23 +321,41 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
     );
   };
 
+  const pileCards = (i: number) => {
+    const owners = s.discardOwners;
+    if (owners && owners.length === s.discard.length) return s.discard.filter((_, k) => owners[k] === i);
+    const t = pileTop(s, i);
+    return t ? [t] : [];
+  };
+  const stackW = compact ? 26 : 40;
+  const stackH = Math.round(stackW * 1.3);
+  const step = Math.round(stackH * 0.42);
   const pile = (i: number | null, kind: 'take' | 'mine' | 'show') => {
-    const top = i === null ? null : pileTop(s, i);
+    const cards = i === null ? [] : pileCards(i);
+    const top = cards[cards.length - 1] ?? null;
     const hot = kind === 'take' ? canTake : kind === 'mine' ? canPlay : false;
     const label = kind === 'mine' ? 'At' : i !== null ? s.players[i].name : '';
+    const onWell = () => {
+      if (kind === 'mine' && selId && canPlay) { discard(selId); return; }
+      if (mine.cift && s.discard.length) setShowAll((v) => !v);
+    };
+    const older = cards.slice(0, -1).reverse();
     return (
       <div className={`pile ${hot ? 'hot' : ''}`}>
-        <div className="well" data-drop={kind === 'mine' ? 'discard' : undefined} style={{ width: pileW + 6, height: Math.round(pileW * 1.3) + 6 }}
-          onClick={kind === 'mine' && selId && canPlay ? () => discard(selId) : undefined}
-          aria-label={kind === 'mine' ? 'Kart atmak için buraya sürükle' : `${label} adlı oyuncunun attığı kart`}>
-          {top && kind === 'take' && canTake ? (
-            <div className="rcard" role="button" tabIndex={0} aria-label={`Yerden al: ${cardName(top)}`}
-              onPointerDown={begin({ kind: 'pile' }, top)} onKeyDown={onKey({ kind: 'pile' })}>
-              <Tile card={top} w={pileW} />
+        <div className="well pstack" data-drop={kind === 'mine' ? 'discard' : undefined} style={{ width: stackW + 8, minHeight: stackH + 6 }}
+          onClick={onWell}
+          aria-label={kind === 'mine' ? 'Kart atmak için buraya sürükle' : `${label} adlı oyuncunun attığı kartlar`}>
+          {top && (kind === 'take' && canTake ? (
+            <div className="rcard" role="button" tabIndex={0} aria-label={`Yerden al: ${cardName(top)}`} style={{ zIndex: cards.length }}
+              onPointerDown={begin({ kind: 'pile' }, top)} onKeyDown={onKey({ kind: 'pile' })} onClick={(e) => e.stopPropagation()}>
+              <Tile card={top} w={stackW} />
             </div>
-          ) : top ? <Tile card={top} w={pileW} /> : null}
+          ) : <div style={{ zIndex: cards.length }}><Tile card={top} w={stackW} /></div>)}
+          {older.map((c, k) => (
+            <div key={c.id} style={{ marginBottom: step - stackH, zIndex: cards.length - 1 - k }}><Tile card={c} w={stackW} /></div>
+          ))}
         </div>
-        {label && <span className="pile-label">{label}</span>}
+        {label && <span className="pile-label">{label}{cards.length > 1 ? ` · ${cards.length}` : ''}</span>}
       </div>
     );
   };
@@ -446,10 +466,6 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
       </div>
 
       <div className="g-rack-row">
-        <button className="bigbtn" onClick={() => setRack(autoCift(mine.hand))} aria-label="Çift diz" style={{ width: bigBtn }}>
-          <span className="bb-icon" aria-hidden="true"><i>5</i><i>5</i></span>
-          <span className="bb-text">ÇİFT<br />DİZ</span>
-        </button>
         <div className="rack-wrap">
           <div className="rack" data-drop="rack" style={{ gridTemplateColumns: `repeat(${COLS}, ${cw}px)`, gridTemplateRows: Array(ROWS).fill(`${ch}px ${labelH}px`).join(' ') }}>
             {Array.from({ length: ROWS }, (_, row) => (
@@ -480,12 +496,33 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
             ))}
           </div>
         </div>
-        <button className="bigbtn" onClick={() => setRack(autoSeri(mine.hand))} aria-label="Seri diz" style={{ width: bigBtn }}>
-          <span className="bb-icon" aria-hidden="true"><i>1</i><i>2</i><i>3</i></span>
-          <span className="bb-text">SERİ<br />DİZ</span>
-        </button>
+        <div className="bigbtns" style={{ width: bigBtn }}>
+          <button className="bigbtn" onClick={() => setRack(autoCift(mine.hand))} aria-label="Çift diz">
+            <span className="bb-icon" aria-hidden="true"><i>5</i><i>5</i></span>
+            <span className="bb-text">ÇİFT DİZ</span>
+          </button>
+          <button className="bigbtn" onClick={() => setRack(autoSeri(mine.hand))} aria-label="Seri diz">
+            <span className="bb-icon" aria-hidden="true"><i>1</i><i>2</i><i>3</i></span>
+            <span className="bb-text">SERİ DİZ</span>
+          </button>
+        </div>
       </div>
 
+      {showAll && (
+        <div className="all-discards" role="dialog" aria-label="Atılan bütün kartlar" onClick={() => setShowAll(false)}>
+          <div className="ad-panel">
+            <h3>Atılan bütün kartlar</h3>
+            {s.players.map((p, i) => {
+              const cs = pileCards(i);
+              return cs.length ? (
+                <div key={i} className="ad-row"><span className="meld-owner">{i === me ? 'Sen' : p.name}</span>
+                  <div className="ad-cards">{cs.map((c) => <Tile key={c.id} card={c} w={meldW} />)}</div></div>
+              ) : null;
+            })}
+            <span className="muted" style={{ fontSize: 12 }}>Kapatmak için tekrar dokun.</span>
+          </div>
+        </div>
+      )}
       {drag && (
         <div className="drag-ghost" style={{ left: drag.x - cw / 2, top: drag.y - ch / 2 }}>
           {drag.card ? <Tile card={drag.card} w={cw} /> : <div className="deck-tile" style={{ width: cw, height: ch }} />}

@@ -318,3 +318,29 @@ describe('skor', () => {
     expect(r).toMatchObject({ phase: 'gameOver', winner: 0, fullRunWin: true });
   });
 });
+
+describe('işlek kart', () => {
+  it('pere işlenebilecek kart atılınca +71 ceza', () => {
+    const h = cs('H8', 'D9', 'S5');
+    const s = setup([h, fill(5)]);
+    s.melds = [{ id: 1, owner: 1, kind: 'run', cards: cs('H5', 'H6', 'H7') }];
+    const r = apply(s, 0, { type: 'discard', cardId: h[0].id });
+    expect(r.players[0].immediate).toBe(71);
+  });
+  it('işlek olmayan kart cezasız', () => {
+    const h = cs('H8', 'D9', 'S5');
+    const s = setup([h, fill(5)]);
+    s.melds = [{ id: 1, owner: 1, kind: 'run', cards: cs('H5', 'H6', 'H7') }];
+    const r = apply(s, 0, { type: 'discard', cardId: h[1].id });
+    expect(r.players[0].immediate).toBe(0);
+  });
+  it('gruba eksik renk de işlektir, çiftler sayılmaz', () => {
+    const h = cs('C9', 'D4', 'S5');
+    const s = setup([h, fill(5)]);
+    s.melds = [{ id: 1, owner: 1, kind: 'set', cards: cs('H9', 'D9', 'S9') }, { id: 2, owner: 1, kind: 'pair', cards: cs('D4', 'D4') }];
+    expect(apply(s, 0, { type: 'discard', cardId: h[0].id }).players[0].immediate).toBe(71);
+    const s2 = setup([cs('C9', 'D4', 'S5'), fill(5)]);
+    s2.melds = s.melds;
+    expect(apply(s2, 0, { type: 'discard', cardId: s2.players[0].hand[1].id }).players[0].immediate).toBe(0);
+  });
+});

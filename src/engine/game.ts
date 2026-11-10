@@ -448,6 +448,18 @@ function doSwap(s: GameState, pi: number, meldId: number, cardId: string): GameS
   return s;
 }
 
+/** İşlek kart atma cezası. */
+export const ISLEK_PENALTY = 71;
+
+/** Kart masadaki bir pere işlenebiliyor ya da bir jokerin yerine geçebiliyor mu? (çiftler hariç) */
+export function isIslek(s: Pick<GameState, 'melds'>, card: Card): boolean {
+  if (card.joker) return false;
+  return s.melds.some((m) => m.kind !== 'pair' && (
+    jokerSwapIndex(m.kind, m.cards, card) >= 0 ||
+    !!resolveAs(m.kind, [...m.cards, card]) ||
+    (m.kind === 'run' && !!resolveAs('run', [card, ...m.cards]))));
+}
+
 function doDiscard(s: GameState, pi: number, cardId: string): GameState {
   assertPlay(s, pi);
   const me = s.players[pi];
@@ -468,6 +480,9 @@ function doDiscard(s: GameState, pi: number, cardId: string): GameState {
   if (card.joker) {
     me.immediate += 71;
     s.log.push(`${me.name} joker attı: +71 ceza.`);
+  } else if (isIslek(s, card)) {
+    me.immediate += ISLEK_PENALTY;
+    s.log.push(`${me.name} işlek kart attı (${cardLabel(card)}): +${ISLEK_PENALTY} ceza.`);
   } else {
     s.log.push(`${me.name} ${cardLabel(card)} attı.`);
   }

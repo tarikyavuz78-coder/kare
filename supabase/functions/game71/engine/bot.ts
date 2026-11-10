@@ -2,7 +2,7 @@
 // 71 – orta seviye yapay zekâ
 import { Card, penaltyValue } from './cards.ts';
 import { resolveGroup, resolvePair, resolveAs, jokerSwapIndex } from './melds.ts';
-import { Action, GameState, checkTake, thresholds, BASE_NORMAL, BASE_PAIRS, MAX_PAIRS } from './game.ts';
+import { Action, GameState, checkTake, isIslek, thresholds, BASE_NORMAL, BASE_PAIRS, MAX_PAIRS } from './game.ts';
 
 interface Cand { reals: Card[]; jokers: number; order: (Card | null)[]; points: number; }
 
@@ -195,7 +195,8 @@ function chooseDiscard(s: GameState, pi: number): string {
   const pool = me.hand.filter((c) => c.id !== s.turn.taken);
   if (me.hand.length === 1) return me.hand[0].id; // bitiş (joker de olabilir)
   const nonJoker = pool.filter((c) => !c.joker);
-  const list = nonJoker.length ? nonJoker : pool;
+  const safe = nonJoker.filter((c) => !isIslek(s, c));
+  const list = safe.length ? safe : nonJoker.length ? nonJoker : pool;
   // bir pere yakın olan kartları tut
   const score = (c: Card) => {
     let keep = 0;
