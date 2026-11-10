@@ -321,3 +321,34 @@ input, textarea, select { font: 15px Inter, sans-serif; }
   .bigbtns { gap: 4px; }
   .bigbtns .bigbtn { flex-direction: column; gap: 2px; }
 }
+/* yan oyuncular da üstteki gibi yatay levha, ortalı */
+.g71 { grid-template-rows: auto minmax(0,1fr) auto auto; }
+.g-mid { overflow: hidden; }
+.g-side { width: 150px; min-height: 0; overflow: hidden; }
+.g-side .plate.h { flex-wrap: wrap; justify-content: center; max-width: 100%; }
+.g-side .plate.h .pname { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.g-bar { grid-template-columns: 1fr auto 1fr; }
+.g-bar .me-plate { justify-self: center; }
+.g-bar .per-bubble { justify-self: end; }
+.g-info .deck { margin-top: auto; }
+@media (max-height: 520px) {
+  .g-side { width: 104px; }
+  .g-side .plate.h { gap: 2px 4px; padding: 3px 5px; }
+  .g-side .plate.h .pname { max-width: 64px; font-size: 11px; }
+  .g-side .plate.h .pcount { width: 100%; text-align: center; }
+}
+.g-side-plate { flex: 1 0 auto; }
+.g-side .pile { min-height: 0; flex-shrink: 1; }
+@media (max-height: 520px) {
+  .g-side { gap: 2px; justify-content: space-between; }
+  .g71 .g-side .pile .well.pstack { max-height: 42px; min-height: 0 !important; }
+  .g71 .g-side .pile-label { font-size: 9px; }
+}
+@media (max-height: 520px) {
+  .g-side { width: 124px; }
+  .g-side .plate.h { flex-wrap: nowrap; padding: 2px 5px; }
+  .g-side .plate.h .pcount { width: auto; font-size: 9px; }
+  .g-side .plate.h .pname { max-width: 60px; font-size: 10px; }
+  .g-side .plate .ptimer, .g-side .plate .pchips { display: none; }
+  .g71 .g-side .pile .well.pstack { max-height: 40px; }
+}
