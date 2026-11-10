@@ -342,7 +342,6 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
 
   const actions = (
     <>
-      {canDraw && <button className="abtn gold" onClick={draw}>Desteden Çek</button>}
       {canDraw && canTake && <button className="abtn" onClick={take}>Yerden Al</button>}
       {canPlay && mine.opened === 'none' && meldSegs.length > 0 && <button className="abtn gold" onClick={openNormal}>Per Aç</button>}
       {canPlay && mine.opened === 'none' && pairCount > 0 && <button className="abtn pair" onClick={openPairs}>Çift Aç</button>}
@@ -404,6 +403,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
           <div className="ibox">Baraj {th.normal}</div>
           <div className="ibox">{th.pairs} çift</div>
           <div className="ibox dim">{title}</div>
+          {canDraw && <button className="abtn gold deck-btn" onClick={draw}>Desteden Çek</button>}
           <div className={`deck ${canDraw ? 'hot' : ''}`} role="button" tabIndex={canDraw ? 0 : -1} aria-label="Desteden kart çek"
             onPointerDown={canDraw ? begin({ kind: 'deck' }, null) : undefined} onKeyDown={onKey({ kind: 'deck' })}>
             <div className="deck-tile" style={{ width: pileW + 8, height: Math.round((pileW + 8) * 1.3) }}>
