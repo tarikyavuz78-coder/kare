@@ -70,7 +70,7 @@ input, textarea, select { font: 15px Inter, sans-serif; }
 .card-btn.sel { transform: translateY(-16px); outline: 3px solid var(--gold); outline-offset: 1px; }
 
 /* oyun masası */
-.game { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.game { height: var(--app-h, 100%); display: flex; flex-direction: column; overflow: hidden; }
 .topbar { height: 60px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .logo { width: 40px; height: 40px; border-radius: 11px; background: var(--gold); color: var(--gold-ink); font: 800 18px Sora, sans-serif; display: flex; align-items: center; justify-content: center; text-decoration: none; }
 .game-body { flex: 1; min-height: 0; display: flex; }

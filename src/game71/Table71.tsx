@@ -1,6 +1,4 @@
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState, PointerEvent as RPointerEvent, KeyboardEvent as RKeyboardEvent } from 'react';
-import { ScreenOrientation } from '@capacitor/screen-orientation';
-import { Capacitor } from '@capacitor/core';
 import { Card as C } from '../engine/cards';
 import { Action, GameState, Player, finalScores, thresholds } from '../engine/game';
 import { jokerSwapIndex, resolveAs, resolveGroup, resolvePair } from '../engine/melds';
@@ -96,13 +94,6 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const canDraw = myTurn && s.turn.phase === 'draw';
   const canPlay = myTurn && s.turn.phase === 'play';
 
-  // telefonda masa yalnızca yatay oynanır
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => undefined);
-    return () => { ScreenOrientation.lock({ orientation: 'portrait' }).catch(() => undefined); window.scrollTo(0, 0); };
-  }, []);
-
   const [rack, setRack] = useState<RackSlots>(() => autoSeri(mine.hand));
   const handNoRef = useRef(s.handNo);
   const pendingSlot = useRef<number | null>(null);
@@ -154,7 +145,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const meldOverlap = Math.round(meldW * 0.45);
 
   // ---------------------------------------------------------------- 15 saniyelik hamle süresi
-  const TURN_MS = 15000;
+  const TURN_MS = 60000;
   const [localStart, setLocalStart] = useState(() => Date.now());
   useEffect(() => { setLocalStart(Date.now()); }, [s.current, s.handNo, s.phase]);
   const start = turnStartedAt ?? localStart;

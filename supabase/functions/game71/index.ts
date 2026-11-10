@@ -21,7 +21,7 @@ const BOT_NAMES = ['Ayşe', 'Mehmet', 'Zeynep', 'Can'];
 
 interface Seat { userId: string | null; name: string; isBot: boolean; left: boolean; }
 interface Meta { seats: Seat[]; pendingAsk: { prev: number; taker: number; deadline: number } | null; handOverAt: number | null; vsBots: boolean; turnStartedAt?: number; }
-const TURN_MS = 15_000;
+const TURN_MS = Number(Deno.env.get('TURN_MS') ?? 60_000);
 const turnKey = (g: GameState) => `${g.handNo}:${g.current}:${g.phase}`;
 interface Stored { game: GameState; meta: Meta; }
 
