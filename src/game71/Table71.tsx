@@ -1,9 +1,9 @@
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState, PointerEvent as RPointerEvent, KeyboardEvent as RKeyboardEvent } from 'react';
-import { Card as C } from '../engine/cards';
+import { Card as C, SUIT_SYMBOL, rankLabel } from '../engine/cards';
 import { Action, GameState, Player, finalScores, thresholds } from '../engine/game';
 import { jokerSwapIndex, resolveAs, resolveGroup, resolvePair } from '../engine/melds';
 import { suggestMelds, suggestPairs } from '../engine/bot';
-import { CardFace, AVATAR_COLORS, cardName } from './ui';
+import { AVATAR_COLORS, cardName } from './ui';
 import { COLS, ROWS, RackSlots, groupsOf, layoutGroups, moveCard, syncRack } from './rack';
 
 export type TableView = Omit<GameState, 'players'> & { players: (Player & { handCount?: number })[]; deckCount?: number };
@@ -28,6 +28,7 @@ interface Props {
 }
 
 type DragSrc = { kind: 'rack'; id: string } | { kind: 'deck' } | { kind: 'pile' };
+type Seat = 'left' | 'top' | 'right';
 
 const handCount = (p: Player & { handCount?: number }) => p.handCount ?? p.hand.length;
 
@@ -56,7 +57,27 @@ function useWidth(ref: React.RefObject<HTMLElement>) {
   return w;
 }
 
-/** Bir oyuncunun önündeki yığının en üstteki kartı. */
+/** Istaka taşı görünümünde kart: ortada büyük sayı, altında renk simgesi. */
+export function Tile({ card, w }: { card: C; w: number }) {
+  const h = Math.round(w * 1.3);
+  const style = { width: w, height: h, borderRadius: Math.max(4, Math.round(w * 0.12)) };
+  if (card.joker) {
+    return (
+      <div className="tile joker" style={style} aria-label="Joker">
+        <span className="tr" style={{ fontSize: Math.round(w * 0.55) }}>★</span>
+        {w >= 34 && <span className="tj" style={{ fontSize: Math.max(7, Math.round(w * 0.18)) }}>JOKER</span>}
+      </div>
+    );
+  }
+  const red = card.suit === 'H' || card.suit === 'D';
+  return (
+    <div className={`tile ${red ? 'red' : 'black'}`} style={style} aria-label={cardName(card)}>
+      <span className="tr" style={{ fontSize: Math.round(w * (card.rank === 10 ? 0.44 : 0.52)) }}>{rankLabel(card.rank!)}</span>
+      <span className="ts" style={{ fontSize: Math.round(w * 0.36) }}>{SUIT_SYMBOL[card.suit!]}</span>
+    </div>
+  );
+}
+
 function pileTop(s: TableView, i: number): C | null {
   const owners = s.discardOwners;
   if (owners && owners.length === s.discard.length) {
@@ -100,10 +121,9 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const [selId, setSelId] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ src: DragSrc; card: C | null; x: number; y: number } | null>(null);
   const pending = useRef<{ src: DragSrc; card: C | null; x0: number; y0: number; moved: boolean } | null>(null);
-  const [ciftAsk, setCiftAsk] = useState(false);
-  const [leaveAsk, setLeaveAsk] = useState(false);
-  const handRef = useRef<HTMLDivElement>(null);
-  const width = useWidth(handRef);
+  const [modal, setModal] = useState<null | 'cift' | 'leave' | 'score' | 'chat'>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const width = useWidth(rootRef);
 
   const handIds = mine.hand.map((c) => c.id).join(',');
   useEffect(() => {
@@ -133,18 +153,25 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const pairCount = pairSegs.length;
   const th = thresholds(s as GameState);
 
-  const cw = width ? Math.max(26, Math.min(compact ? 38 : 64, Math.floor((width - 87) / 16))) : compact ? 34 : 56;
-  const ch = Math.round(cw * 1.42);
-  const labelH = compact ? 12 : 16;
+  // ölçüler: ıstaka iki yanındaki büyük düğmelerle tüm genişliği kaplar
+  const bigBtn = compact ? 66 : 112;
+  const cw = width ? Math.max(28, Math.min(compact ? 40 : 74, Math.floor((width - 2 * bigBtn - 24 - 16 - 39) / 14))) : compact ? 40 : 64;
+  const ch = Math.round(cw * 1.3);
+  const labelH = compact ? 11 : 15;
+  const pileW = compact ? 30 : 46;
+  const meldW = compact ? 24 : 36;
 
   const leftTop = pileTop(s, prev);
-  const rightTop = pileTop(s, me);
   const lastDiscard = s.discard[s.discard.length - 1];
   const canTake = canDraw && !!leftTop && s.discardBy === prev && lastDiscard?.id === leftTop.id && !s.deadJoker;
-  const meldW = compact ? 28 : 44;
-  const meldOverlap = Math.round(meldW * 0.45);
 
-  // ---------------------------------------------------------------- 15 saniyelik hamle süresi
+  // oturma düzeni: ben altta, sıradaki sağda, önceki solda
+  const seatOf: Partial<Record<Seat, number>> = {};
+  if (n === 2) seatOf.top = (me + 1) % n;
+  if (n === 3) { seatOf.right = (me + 1) % n; seatOf.left = (me + 2) % n; }
+  if (n === 4) { seatOf.right = (me + 1) % n; seatOf.top = (me + 2) % n; seatOf.left = (me + 3) % n; }
+
+  // ---------------------------------------------------------------- 1 dakikalık hamle süresi
   const TURN_MS = 60000;
   const [localStart, setLocalStart] = useState(() => Date.now());
   useEffect(() => { setLocalStart(Date.now()); }, [s.turnNo, s.current, s.handNo, s.phase]);
@@ -156,6 +183,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
     return () => clearInterval(t);
   }, [s.phase]);
   const secondsLeft = Math.max(0, Math.ceil((TURN_MS - (now - start)) / 1000));
+  const clock = `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}`;
   const firedRef = useRef<number | null>(null);
   useEffect(() => {
     if (!onTimeout || !myTurn || paused || drag || now - start < TURN_MS || firedRef.current === start) return;
@@ -164,7 +192,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
     setSelId(null);
     onTimeout(leftmost);
   }, [now]); // eslint-disable-line react-hooks/exhaustive-deps
-  const askLeave = () => (s.phase === 'gameOver' ? onExit() : setLeaveAsk(true));
+  const askLeave = () => (s.phase === 'gameOver' ? onExit() : setModal('leave'));
 
   // ---------------------------------------------------------------- hamleler
   const draw = () => act({ type: 'draw' });
@@ -206,7 +234,6 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
     else if (src.kind === 'deck' && canDraw) draw();
     else if (src.kind === 'pile' && canTake) take();
   };
-
   const drop = (src: DragSrc, el: HTMLElement | null, x: number) => {
     const zone = el?.dataset.drop;
     if (src.kind === 'rack') {
@@ -220,7 +247,6 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
     if (src.kind === 'deck' && canDraw) draw();
     if (src.kind === 'pile' && canTake) take();
   };
-
   const begin = (src: DragSrc, card: C | null) => (e: RPointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const p = { src, card, x0: e.clientX, y0: e.clientY, moved: false };
@@ -254,212 +280,250 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   // ---------------------------------------------------------------- parçalar
   const scores = finalScores(s as GameState);
   const lastHand = s.history[s.history.length - 1];
-  const others = s.players.map((p, i) => ({ p, i })).filter((x) => x.i !== me);
-  const ownersWithMelds = s.players.map((p, i) => ({ p, i, melds: s.melds.filter((m) => m.owner === i) })).filter((x) => x.melds.length);
+  const seqMelds = s.melds.filter((m) => m.kind !== 'pair');
+  const pairMelds = s.melds.filter((m) => m.kind === 'pair');
+  const owners = (list: typeof s.melds) => s.players.map((p, i) => ({ p, i, melds: list.filter((m) => m.owner === i) })).filter((x) => x.melds.length);
 
-  const opponents = (
-    <div className="opponents">
-      {others.map(({ p, i }) => {
-        const top = pileTop(s, i);
-        return (
-          <div key={i} className={`panel seat ${s.current === i && s.phase === 'playing' ? 'active' : ''}`}>
-            <div className="avatar" style={{ background: AVATAR_COLORS[i % 4] }}>{p.name[0]}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-              <strong style={{ fontSize: 14 }}>{p.name}{p.isBot && !compact && <span className="muted"> · Bot</span>}</strong>
-              <div className="row" style={{ gap: 4 }}><StatusChips p={p} /></div>
-            </div>
-            <span className="muted" style={{ fontSize: 12 }}>{handCount(p)} kart</span>
-            {s.current === i && s.phase === 'playing' && turnStartedAt != null && <span className="chip chip-turn">{secondsLeft} sn</span>}
-            {!compact && top && i !== prev && <div title="Son attığı kart"><CardFace card={top} w={30} /></div>}
-          </div>
-        );
-      })}
-    </div>
+  const meldEl = (m: TableView['melds'][number]) => {
+    const t = targetFor(m);
+    return (
+      <div key={m.id} className={`meld ${t ? 'target' : ''}`} data-drop="meld" data-meld={m.id}
+        onClick={t && selId ? () => playOnMeld(m.id, selId) : undefined}
+        role={t && selId ? 'button' : undefined} aria-label={t && selId ? 'Seçili kartı buraya işle' : undefined}>
+        {m.cards.map((c) => <Tile key={c.id} card={c} w={meldW} />)}
+      </div>
+    );
+  };
+
+  const chips = (p: Player) => (
+    <>
+      {p.opened === 'normal' && <span className="pchip open">Açtı {p.openValue}</span>}
+      {p.opened === 'pairs' && <span className="pchip pair">{p.openValue} çift</span>}
+      {p.cift && p.opened === 'none' && <span className="pchip cift">Çifte Git</span>}
+      {p.stars > 0 && <span className="pchip star">★{p.stars}</span>}
+      {p.starsDeleted && <span className="pchip del">★ silindi</span>}
+    </>
   );
 
-  const pile = (side: 'left' | 'right') => {
-    const top = side === 'left' ? leftTop : rightTop;
-    const hot = side === 'left' ? canTake : canPlay;
+  const plate = (i: number, orient: 'v' | 'h') => {
+    const p = s.players[i];
+    const active = s.current === i && s.phase === 'playing';
     return (
-      <div className={`pile ${hot ? 'hot' : ''}`} style={{ width: cw + 8 }}>
-        <div className="well" data-drop={side === 'right' ? 'discard' : undefined} style={{ width: cw + 6, height: ch + 6 }}
-          onClick={side === 'right' && selId && canPlay ? () => discard(selId) : undefined}
-          aria-label={side === 'right' ? 'Atılan kartlar: kart atmak için buraya sürükle' : `${s.players[prev].name} adlı oyuncunun attığı kart`}>
-          {top && side === 'left' && canTake ? (
+      <div className={`plate ${orient} ${active ? 'active' : ''}`}>
+        <div className="avatar" style={{ background: AVATAR_COLORS[i % 4] }}>{p.name[0]}</div>
+        <div className="pname">{p.name}{p.isBot ? ' · Bot' : ''}</div>
+        <div className="pchips">{chips(p)}</div>
+        <div className="pcount">{handCount(p)} kart</div>
+        {active && <div className="ptimer">{turnStartedAt != null || i === me ? clock : '…'}</div>}
+      </div>
+    );
+  };
+
+  const pile = (i: number | null, kind: 'take' | 'mine' | 'show') => {
+    const top = i === null ? null : pileTop(s, i);
+    const hot = kind === 'take' ? canTake : kind === 'mine' ? canPlay : false;
+    const label = kind === 'mine' ? 'At' : i !== null ? s.players[i].name : '';
+    return (
+      <div className={`pile ${hot ? 'hot' : ''}`}>
+        <div className="well" data-drop={kind === 'mine' ? 'discard' : undefined} style={{ width: pileW + 6, height: Math.round(pileW * 1.3) + 6 }}
+          onClick={kind === 'mine' && selId && canPlay ? () => discard(selId) : undefined}
+          aria-label={kind === 'mine' ? 'Kart atmak için buraya sürükle' : `${label} adlı oyuncunun attığı kart`}>
+          {top && kind === 'take' && canTake ? (
             <div className="rcard" role="button" tabIndex={0} aria-label={`Yerden al: ${cardName(top)}`}
               onPointerDown={begin({ kind: 'pile' }, top)} onKeyDown={onKey({ kind: 'pile' })}>
-              <CardFace card={top} w={cw} />
+              <Tile card={top} w={pileW} />
             </div>
-          ) : top ? <CardFace card={top} w={cw} /> : null}
+          ) : top ? <Tile card={top} w={pileW} /> : null}
         </div>
-        <span className="pile-label">{side === 'left' ? s.players[prev].name : 'At'}</span>
+        {label && <span className="pile-label">{label}</span>}
       </div>
     );
   };
 
   const actions = (
     <>
-      {canDraw && <>
-        <button className="btn btn-gold" onClick={draw}>Desteden Çek</button>
-        <button className="btn" disabled={!canTake} onClick={take}>Yerden Al</button>
-      </>}
-      {canPlay && mine.opened === 'none' && <>
-        <button className="btn btn-gold" disabled={!meldSegs.length} onClick={openNormal}>Per Aç</button>
-        <button className="btn btn-pair" disabled={!pairCount} onClick={openPairs}>Çift Aç</button>
-      </>}
-      {canPlay && mine.opened !== 'none' && (
-        <button className="btn btn-gold" disabled={!meldGroups.length} onClick={meldMore}>{mine.opened === 'pairs' ? 'Çift İndir' : 'Per İndir'}</button>
-      )}
-      {canPlay && s.turn.taken && <button className="btn" onClick={() => act({ type: 'undoTake' })}>Almayı Geri Al</button>}
-      {canPlay && <button className="btn" disabled={!selId} onClick={() => selId && discard(selId)}>Kartı At</button>}
-      {s.phase === 'playing' && mine.opened === 'none' && !mine.cift && <button className="btn btn-cift" onClick={() => setCiftAsk(true)}>Çifte Git</button>}
+      {canDraw && <button className="abtn gold" onClick={draw}>Desteden Çek</button>}
+      {canDraw && canTake && <button className="abtn" onClick={take}>Yerden Al</button>}
+      {canPlay && mine.opened === 'none' && meldSegs.length > 0 && <button className="abtn gold" onClick={openNormal}>Per Aç</button>}
+      {canPlay && mine.opened === 'none' && pairCount > 0 && <button className="abtn pair" onClick={openPairs}>Çift Aç</button>}
+      {canPlay && mine.opened !== 'none' && meldGroups.length > 0 && <button className="abtn gold" onClick={meldMore}>{mine.opened === 'pairs' ? 'Çift İndir' : 'Per İndir'}</button>}
+      {canPlay && s.turn.taken && <button className="abtn" onClick={() => act({ type: 'undoTake' })}>Geri Al</button>}
+      {canPlay && selId && <button className="abtn" onClick={() => discard(selId)}>Kartı At</button>}
+      {s.phase === 'playing' && mine.opened === 'none' && !mine.cift && <button className="abtn cift" onClick={() => setModal('cift')}>Çifte Git</button>}
     </>
   );
 
+  const corner = (pos: 'tl' | 'tr' | 'bl' | 'br') => {
+    if (pos === 'bl') return pile(prev, 'take');
+    if (pos === 'br') return pile(me, 'mine');
+    if (pos === 'tl') return seatOf.top !== undefined && n === 4 ? pile(seatOf.top, 'show') : null;
+    return seatOf.right !== undefined ? pile(seatOf.right, 'show') : null;
+  };
+
   return (
-    <div className="game">
+    <div className="g71" ref={rootRef}>
       <div className="rotate-hint">Oynamak için telefonunuzu yatay çevirin.</div>
-      <header className="topbar">
-        <div className="row" style={{ flexWrap: 'nowrap' }}>
-          <button className="logo" onClick={askLeave} aria-label="Oyundan ayrıl" style={{ border: 'none' }}>71</button>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <strong style={{ fontFamily: 'Sora' }}>El {s.handNo}/{s.targetHands}</strong>
-            {!compact && <span className="muted" style={{ fontSize: 12 }}>{title}</span>}
+
+      <header className="g-top">
+        <div className="g-top-l">
+          <button className="g-logo" onClick={askLeave} aria-label="Oyundan ayrıl">71</button>
+          {headerExtra}
+          <div className={`g-clock ${myTurn && secondsLeft <= 10 ? 'urgent' : ''}`} aria-label="Hamle süresi">
+            <span aria-hidden="true">⏱</span> {myTurn ? clock : '–'}
           </div>
         </div>
-        {compact && opponents}
-        <div className="row" style={{ flexWrap: 'nowrap' }}>
-          {!compact && <span className="muted" style={{ fontSize: 12 }}>Baraj: {th.normal} puan · {th.pairs} çift</span>}
-          {headerExtra}
-          <button className="btn btn-ghost leave-btn" onClick={askLeave}>Oyundan Ayrıl</button>
+        <div className="g-top-c">{seatOf.top !== undefined && plate(seatOf.top, 'h')}</div>
+        <div className="g-top-r">
+          <button className="g-ibtn" onClick={() => setModal('score')}>Skor</button>
+          {sideExtra && <button className="g-ibtn" onClick={() => setModal('chat')}>Sohbet</button>}
+          <button className="g-ibtn leave-btn" onClick={askLeave}>Oyundan Ayrıl</button>
         </div>
       </header>
 
-      <div className="game-body">
-        <main className="game-main">
-          {!compact && opponents}
+      <div className="g-mid">
+        <div className="g-side">
+          {corner('tl')}
+          <div className="g-side-plate">{seatOf.left !== undefined && plate(seatOf.left, 'v')}</div>
+          {corner('bl')}
+        </div>
 
-          <section className="table" aria-label="Masa">
-            <div className="melds">
-              {ownersWithMelds.length === 0 && <span className="muted" style={{ margin: 'auto' }}>Henüz kimse açmadı.</span>}
-              <div className="meld-flow">
-                {ownersWithMelds.map(({ p, i, melds }) => (
-                  <Fragment key={i}>
-                    <span className="meld-owner">{i === me ? 'Sen' : p.name}</span>
-                    {melds.map((m) => {
-                      const t = targetFor(m);
-                      return (
-                        <div key={m.id} className={`meld ${t ? 'target' : ''}`} data-drop="meld" data-meld={m.id}
-                          onClick={t && selId ? () => playOnMeld(m.id, selId) : undefined}
-                          role={t && selId ? 'button' : undefined} aria-label={t && selId ? 'Seçili kartı buraya işle' : undefined}>
-                          {m.cards.map((c, k) => (
-                            <div key={c.id} style={{ marginLeft: k ? -meldOverlap : 0 }}><CardFace card={c} w={meldW} /></div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </Fragment>
-                ))}
-              </div>
-            </div>
-            <div className={`deck ${canDraw ? 'hot' : ''}`} role="button" tabIndex={canDraw ? 0 : -1} aria-label="Desteden kart çek"
-              onPointerDown={canDraw ? begin({ kind: 'deck' }, null) : undefined} onKeyDown={onKey({ kind: 'deck' })}>
-              <div className="card-back" style={compact ? { width: 36, height: 51, borderRadius: 6 } : { width: 58, height: 82, borderRadius: 8, boxShadow: '3px 3px 0 #0B2A21' }} />
-              <span className="muted" style={{ fontSize: 12 }}>Deste {s.deckCount ?? s.deck.length}</span>
-            </div>
-          </section>
-
-          <div className="hand-area" ref={handRef}>
-            <div className="hand-bar">
-              <div className="row" style={{ gap: 8 }}>
-                {myTurn && <span className={`chip chip-turn ${onTimeout && secondsLeft <= 5 ? 'urgent' : ''}`}>Sıra sende{onTimeout ? ` · ${secondsLeft} sn` : ''}</span>}
-                <StatusChips p={mine} />
-                {waitingText && <span className="muted" style={{ fontSize: 13 }}>{waitingText}</span>}
-              </div>
-              <div className="per-info" aria-live="polite">
-                <span>Per <b style={{ color: perPts >= th.normal ? 'var(--ok)' : 'var(--text)' }}>{perPts}</b></span>
-                <span>Çift <b style={{ color: pairCount >= th.pairs ? 'var(--ok)' : 'var(--text)' }}>{pairCount}</b></span>
-                {mine.opened === 'none' && !compact && <span className="muted">baraj {th.normal} · {th.pairs} çift</span>}
-              </div>
-              <div className="row" style={{ gap: 6 }}>
-                <button className="btn" onClick={() => setRack(autoSeri(mine.hand))}>Seri Diz</button>
-                <button className="btn" onClick={() => setRack(autoCift(mine.hand))}>Çift Diz</button>
-                {compact && actions}
-              </div>
-            </div>
-
-            <div className="rack-wrap">
-              {pile('left')}
-              <div className="rack" data-drop="rack" style={{ gridTemplateColumns: `repeat(${COLS}, ${cw}px)`, gridTemplateRows: Array(ROWS).fill(`${ch}px ${labelH}px`).join(' ') }}>
-                {Array.from({ length: ROWS }, (_, row) => (
-                  <Fragment key={row}>
-                    {Array.from({ length: COLS }, (_, col) => {
-                      const i = row * COLS + col;
-                      const id = rack[i];
-                      const card = id ? byId.get(id) : undefined;
-                      return (
-                        <div key={i} className="slot" data-drop="slot" data-slot={i} style={{ gridRow: row * 2 + 1, gridColumn: col + 1 }}
-                          onClick={!card && selId ? () => setRack((r) => moveCard(r, r.indexOf(selId), i)) : undefined}>
-                          {card && (
-                            <div role="button" tabIndex={0} aria-label={cardName(card)} aria-pressed={selId === card.id}
-                              className={`rcard ${selId === card.id ? 'sel' : ''} ${drag?.src.kind === 'rack' && drag.src.id === card.id ? 'dragging' : ''}`}
-                              onPointerDown={begin({ kind: 'rack', id: card.id }, card)} onKeyDown={onKey({ kind: 'rack', id: card.id })}>
-                              <CardFace card={card} w={cw} />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {segs.filter((g) => g.row === row && g.kind).map((g) => (
-                      <div key={`g${g.start}`} className={`glabel ${g.kind}`} style={{ gridRow: row * 2 + 2, gridColumn: `${(g.start % COLS) + 1} / ${(g.end % COLS) + 2}` }}>
-                        {g.kind === 'meld' ? g.pts : 'çift'}
-                      </div>
-                    ))}
-                  </Fragment>
-                ))}
-              </div>
-              {pile('right')}
-            </div>
-
-            {!compact && <div className="actions">{actions}</div>}
-            {!compact && <div className="rack-hint">Kartları sürükleyerek diz; aralarına boşluk bıraktığın kartlar ayrı per sayılır. Atmak için kartı sağdaki “At” kutusuna, işlemek için masadaki pere sürükle.</div>}
+        <section className="g-table" aria-label="Masa">
+          {seqMelds.length === 0 && <span className="g-empty">Henüz kimse açmadı</span>}
+          <div className="meld-flow">
+            {owners(seqMelds).map(({ p, i, melds }) => (
+              <Fragment key={i}>
+                <span className="meld-owner">{i === me ? 'Sen' : p.name}</span>
+                {melds.map(meldEl)}
+              </Fragment>
+            ))}
           </div>
-        </main>
+        </section>
 
-        <aside className="sidebar">
-          <section className="stack" style={{ gap: 8 }}>
-            <h2 style={{ fontSize: 15 }}>Skor · {s.history.length} el</h2>
-            <table className="score-table">
-              <thead><tr><th>Oyuncu</th><th>Ceza</th><th>★</th><th>Final</th></tr></thead>
-              <tbody>
-                {scores.map((f, i) => (
-                  <tr key={i}><td style={{ fontWeight: i === me ? 700 : 500 }}>{f.name}</td><td>{f.penalty}</td><td style={{ color: 'var(--gold-soft)' }}>{f.stars}</td><td style={{ fontWeight: 700 }}>{f.final}</td></tr>
-                ))}
-              </tbody>
-            </table>
-            <span className="muted" style={{ fontSize: 11 }}>Final = Ceza − (★ × 101)</span>
-          </section>
-          <section className="stack" style={{ gap: 8 }}>
-            <h2 style={{ fontSize: 15 }}>Son hamleler</h2>
-            <ol className="log">{s.log.slice(-10).reverse().map((l, i) => <li key={i}>{l}</li>)}</ol>
-          </section>
-          {sideExtra}
+        <aside className="g-info">
+          <div className="ibox">El {s.handNo}/{s.targetHands}</div>
+          <div className="ibox">Baraj {th.normal}</div>
+          <div className="ibox">{th.pairs} çift</div>
+          <div className="ibox dim">{title}</div>
+          <div className={`deck ${canDraw ? 'hot' : ''}`} role="button" tabIndex={canDraw ? 0 : -1} aria-label="Desteden kart çek"
+            onPointerDown={canDraw ? begin({ kind: 'deck' }, null) : undefined} onKeyDown={onKey({ kind: 'deck' })}>
+            <div className="deck-tile" style={{ width: pileW + 8, height: Math.round((pileW + 8) * 1.3) }}>
+              <span>{s.deckCount ?? s.deck.length}</span>
+            </div>
+          </div>
         </aside>
+
+        <section className="g-pairs" aria-label="Çiftler">
+          {pairMelds.length === 0 && <span className="g-empty small">Çiftler</span>}
+          {owners(pairMelds).map(({ p, i, melds }) => (
+            <div key={i} className="pair-group">
+              <span className="meld-owner">{i === me ? 'Sen' : p.name}</span>
+              <div className="pair-list">{melds.map(meldEl)}</div>
+            </div>
+          ))}
+        </section>
+
+        <div className="g-side">
+          {corner('tr')}
+          <div className="g-side-plate">{seatOf.right !== undefined && plate(seatOf.right, 'v')}</div>
+          {corner('br')}
+        </div>
+      </div>
+
+      <div className="g-bar">
+        <div className="g-actions">{actions}</div>
+        <div className={`me-plate ${myTurn ? 'active' : ''}`}>
+          <div className="avatar" style={{ background: AVATAR_COLORS[me % 4] }}>{mine.name[0]}</div>
+          <span className="pname">{mine.name}</span>
+          {chips(mine)}
+          {myTurn ? <span className={`ptimer ${secondsLeft <= 10 ? 'urgent' : ''}`}>Sıra sende · {clock}</span> : waitingText ? <span className="pwait">{waitingText}</span> : null}
+        </div>
+        <div className="per-bubble" aria-live="polite">
+          <span className={perPts >= th.normal ? 'ok' : ''}>{perPts}</span>
+          <small>per</small>
+          <span className={pairCount >= th.pairs ? 'ok' : ''}>{pairCount}</span>
+          <small>çift</small>
+        </div>
+      </div>
+
+      <div className="g-rack-row">
+        <button className="bigbtn" onClick={() => setRack(autoCift(mine.hand))} aria-label="Çift diz" style={{ width: bigBtn }}>
+          <span className="bb-icon" aria-hidden="true"><i>5</i><i>5</i></span>
+          <span className="bb-text">ÇİFT<br />DİZ</span>
+        </button>
+        <div className="rack-wrap">
+          <div className="rack" data-drop="rack" style={{ gridTemplateColumns: `repeat(${COLS}, ${cw}px)`, gridTemplateRows: Array(ROWS).fill(`${ch}px ${labelH}px`).join(' ') }}>
+            {Array.from({ length: ROWS }, (_, row) => (
+              <Fragment key={row}>
+                {Array.from({ length: COLS }, (_, col) => {
+                  const i = row * COLS + col;
+                  const id = rack[i];
+                  const card = id ? byId.get(id) : undefined;
+                  return (
+                    <div key={i} className="slot" data-drop="slot" data-slot={i} style={{ gridRow: row * 2 + 1, gridColumn: col + 1 }}
+                      onClick={!card && selId ? () => setRack((r) => moveCard(r, r.indexOf(selId), i)) : undefined}>
+                      {card && (
+                        <div role="button" tabIndex={0} aria-label={cardName(card)} aria-pressed={selId === card.id}
+                          className={`rcard ${selId === card.id ? 'sel' : ''} ${drag?.src.kind === 'rack' && drag.src.id === card.id ? 'dragging' : ''}`}
+                          onPointerDown={begin({ kind: 'rack', id: card.id }, card)} onKeyDown={onKey({ kind: 'rack', id: card.id })}>
+                          <Tile card={card} w={cw} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {segs.filter((g) => g.row === row && g.kind).map((g) => (
+                  <div key={`g${g.start}`} className={`glabel ${g.kind}`} style={{ gridRow: row * 2 + 2, gridColumn: `${(g.start % COLS) + 1} / ${(g.end % COLS) + 2}` }}>
+                    {g.kind === 'meld' ? g.pts : 'çift'}
+                  </div>
+                ))}
+              </Fragment>
+            ))}
+          </div>
+        </div>
+        <button className="bigbtn" onClick={() => setRack(autoSeri(mine.hand))} aria-label="Seri diz" style={{ width: bigBtn }}>
+          <span className="bb-icon" aria-hidden="true"><i>1</i><i>2</i><i>3</i></span>
+          <span className="bb-text">SERİ<br />DİZ</span>
+        </button>
       </div>
 
       {drag && (
         <div className="drag-ghost" style={{ left: drag.x - cw / 2, top: drag.y - ch / 2 }}>
-          {drag.card ? <CardFace card={drag.card} w={cw} /> : <div className="card-back" style={{ width: cw, height: ch, borderRadius: 8 }} />}
+          {drag.card ? <Tile card={drag.card} w={cw} /> : <div className="deck-tile" style={{ width: cw, height: ch }} />}
         </div>
       )}
 
-      {leaveAsk && (
+      {modal === 'leave' && (
         <ConfirmBox title="Oyundan ayrıl" text={leaveText ?? 'Oyundan ayrılırsan bu oyun senin için biter.'}
-          yes="Ayrıl" onYes={() => { setLeaveAsk(false); onExit(); }} onNo={() => setLeaveAsk(false)} />
+          yes="Ayrıl" onYes={() => { setModal(null); onExit(); }} onNo={() => setModal(null)} />
       )}
-      {ciftAsk && (
+      {modal === 'cift' && (
         <ConfirmBox title="Çifte Git" text="Bu el yalnızca çiftle açabilirsin ve bu karar el bitene kadar geri alınamaz."
-          yes="Çifte Git" onYes={() => { setCiftAsk(false); act({ type: 'declareCift' }); }} onNo={() => setCiftAsk(false)} />
+          yes="Çifte Git" onYes={() => { setModal(null); act({ type: 'declareCift' }); }} onNo={() => setModal(null)} />
+      )}
+      {modal === 'score' && (
+        <div className="modal-bg" role="dialog" aria-modal="true" aria-label="Skor">
+          <div className="panel modal">
+            <h2>Skor · {s.history.length} el</h2>
+            <table className="score-table">
+              <thead><tr><th>Oyuncu</th><th>Ceza</th><th>★</th><th>Final</th></tr></thead>
+              <tbody>{scores.map((f, i) => (
+                <tr key={i}><td style={{ fontWeight: i === me ? 700 : 500 }}>{f.name}</td><td>{f.penalty}</td><td>{f.stars}</td><td style={{ fontWeight: 700 }}>{f.final}</td></tr>
+              ))}</tbody>
+            </table>
+            <span className="muted" style={{ fontSize: 12 }}>Final = Ceza − (★ × 101)</span>
+            <h3 style={{ fontSize: 15 }}>Son hamleler</h3>
+            <ol className="log">{s.log.slice(-12).reverse().map((l, i) => <li key={i}>{l}</li>)}</ol>
+            <button className="btn btn-gold" onClick={() => setModal(null)}>Kapat</button>
+          </div>
+        </div>
+      )}
+      {modal === 'chat' && (
+        <div className="modal-bg" role="dialog" aria-modal="true" aria-label="Sohbet">
+          <div className="panel modal">
+            {sideExtra}
+            <button className="btn" onClick={() => setModal(null)}>Kapat</button>
+          </div>
+        </div>
       )}
       {s.phase === 'handOver' && lastHand && (
         <div className="modal-bg" role="dialog" aria-modal="true" aria-label="El sonucu">
@@ -498,17 +562,6 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
       )}
     </div>
   );
-}
-
-function StatusChips({ p }: { p: Player }) {
-  return <>
-    {p.opened === 'normal' && <span className="chip chip-open">Açtı · {p.openValue}</span>}
-    {p.opened === 'pairs' && <span className="chip chip-pair">{p.openValue} çift</span>}
-    {p.cift && p.opened === 'none' && <span className="chip chip-cift">Çifte Git</span>}
-    {p.stars > 0 && <span className="chip chip-star">★ {p.stars}</span>}
-    {p.starsDeleted && <span className="chip" style={{ background: '#3A1418', color: '#FFD9DC' }}>★ silindi</span>}
-    {p.opened === 'none' && !p.cift && <span className="muted" style={{ fontSize: 12 }}>Açmadı</span>}
-  </>;
 }
 
 export function ConfirmBox({ title, text, yes, onYes, onNo }: { title: string; text: string; yes: string; onYes: () => void; onNo: () => void }) {
