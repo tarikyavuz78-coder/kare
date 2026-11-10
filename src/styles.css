@@ -176,3 +176,10 @@ input, textarea, select { font: 15px Inter, sans-serif; }
   .topbar .opponents { flex: 1; min-width: 0; justify-content: center; flex-wrap: nowrap; overflow: hidden; }
   .topbar .seat { padding: 2px 8px; }
 }
+
+/* masa: tüm açılmış perler tek akışta, kartlar üst üste */
+.meld-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.meld-flow .meld-owner { margin: 0 0 0 4px; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,.2); }
+.meld-flow .meld { gap: 0; padding: 4px; }
+.chip-turn.urgent { background: #E46A6A; color: #fff; }
+@media (max-height: 520px) { .leave-btn { min-height: 34px; padding: 0 10px; font-size: 12px; } }

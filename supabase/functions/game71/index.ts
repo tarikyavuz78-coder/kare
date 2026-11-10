@@ -20,7 +20,9 @@ const HAND_OVER_MS = 8_000;
 const BOT_NAMES = ['Ayşe', 'Mehmet', 'Zeynep', 'Can'];
 
 interface Seat { userId: string | null; name: string; isBot: boolean; left: boolean; }
-interface Meta { seats: Seat[]; pendingAsk: { prev: number; taker: number; deadline: number } | null; handOverAt: number | null; vsBots: boolean; }
+interface Meta { seats: Seat[]; pendingAsk: { prev: number; taker: number; deadline: number } | null; handOverAt: number | null; vsBots: boolean; turnStartedAt?: number; }
+const TURN_MS = 15_000;
+const turnKey = (g: GameState) => `${g.handNo}:${g.current}:${g.phase}`;
 interface Stored { game: GameState; meta: Meta; }
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
@@ -43,6 +45,7 @@ Deno.serve(async (req) => {
       case 'act': return json(await mutate(body.tableId, (st) => act(st, uid, body.action as Action)));
       case 'take': return json(await mutate(body.tableId, (st) => humanTake(st, uid, !!body.declareCift)));
       case 'answer': return json(await mutate(body.tableId, (st) => answerAsk(st, uid, !!body.yes)));
+      case 'timeout': return json(await mutate(body.tableId, (st) => timeoutMove(st, uid, body.cardId ?? null)));
       case 'leave': return json(await mutate(body.tableId, (st, t) => leave(st, t, uid)));
       default: return json({ error: 'Bilinmeyen işlem.' }, 400);
     }
@@ -131,7 +134,7 @@ async function fillAndStart(tableId: string) {
 
 async function startGame(tableId: string, seats: Seat[], humans: number, vsBots: boolean) {
   const game = createGame(seats.map((s) => s.name), { bots: seats.map((s) => s.isBot), ids: seats.map((s, i) => s.userId ?? `bot${i}`) });
-  const st: Stored = { game, meta: { seats, pendingAsk: null, handOverAt: null, vsBots } };
+  const st: Stored = { game, meta: { seats, pendingAsk: null, handOverAt: null, vsBots, turnStartedAt: Date.now() } };
   runBots(st);
   await admin.from('game_tables').update({ status: 'playing', human_count: humans, started_at: new Date().toISOString() }).eq('id', tableId);
   await admin.from('game_states').insert({ table_id: tableId, state: st, version: 1 });
@@ -146,6 +149,7 @@ async function mutate(tableId: string, fn: Mutator) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const { data: t } = await admin.from('game_tables').select('*').eq('id', tableId).single();
     if (!t) throw new UserError('Masa bulunamadı.');
+    if (t.status === 'abandoned') throw new UserError('Bu oyun sona erdi.');
     const { data: row } = await admin.from('game_states').select('state, version').eq('table_id', tableId).maybeSingle();
     if (!row) {
       // masa henüz başlamadı: yalnızca bekleme kontrolü
@@ -154,10 +158,12 @@ async function mutate(tableId: string, fn: Mutator) {
     }
     const st = row.state as Stored;
     const before = JSON.stringify(st);
+    const key0 = turnKey(st.game);
     const result = await fn(st, t);
     runBots(st);
     autoResolve(st);
     runBots(st);
+    if (turnKey(st.game) !== key0) st.meta.turnStartedAt = Date.now();
     if (JSON.stringify(st) === before) return result ?? { ok: true };
     const { data: upd } = await admin.from('game_states').update({ state: st, version: row.version + 1, updated_at: new Date().toISOString() })
       .eq('table_id', tableId).eq('version', row.version).select('version');
@@ -220,6 +226,7 @@ function answerAsk(st: Stored, uid: string, yes: boolean) {
 function resolveAsk(st: Stored, yes: boolean) {
   const ask = st.meta.pendingAsk!;
   st.meta.pendingAsk = null;
+  st.meta.turnStartedAt = Date.now();
   if (yes) {
     st.game = apply(st.game, ask.prev, { type: 'declareCift' });
     if (st.meta.seats[ask.taker].isBot) st.game = apply(st.game, ask.taker, { type: 'draw' });
@@ -271,6 +278,23 @@ function runBots(st: Stored) {
   }
 }
 
+/** Süre dolunca: yerden alma geri alınır, desteden çekilir, en soldaki kart (yoksa ilk kart) atılır. */
+function autoMove(st: Stored, pi: number, cardId: string | null) {
+  if (st.game.phase !== 'playing' || st.game.current !== pi || st.meta.pendingAsk) return;
+  if (st.game.turn.taken) st.game = apply(st.game, pi, { type: 'undoTake' });
+  if (st.game.turn.phase === 'draw') st.game = apply(st.game, pi, { type: 'draw' });
+  const hand = st.game.players[pi].hand;
+  const id = cardId && hand.some((c) => c.id === cardId) ? cardId : hand[0].id;
+  st.game = apply(st.game, pi, { type: 'discard', cardId: id });
+}
+
+function timeoutMove(st: Stored, uid: string, cardId: string | null) {
+  const pi = seatOf(st, uid);
+  if (st.game.current !== pi || Date.now() - (st.meta.turnStartedAt ?? 0) < TURN_MS - 1000) return { ok: false };
+  autoMove(st, pi, cardId);
+  return { ok: true };
+}
+
 async function tick(st: Stored, _t: Record<string, unknown>, uid: string) {
   const tableId = String(_t.id);
   const pi = seatOf(st, uid);
@@ -283,6 +307,8 @@ async function tick(st: Stored, _t: Record<string, unknown>, uid: string) {
     st.game.players[pi].isBot = false;
     await admin.from('table_players').update({ is_bot: false, bot_reason: null }).eq('table_id', tableId).eq('seat', pi);
   }
+  const g = st.game;
+  if (g.phase === 'playing' && !st.meta.pendingAsk && !st.meta.seats[g.current].isBot && Date.now() - (st.meta.turnStartedAt ?? Date.now()) > TURN_MS + 7000) autoMove(st, g.current, null);
   if (st.meta.vsBots) return;
   const { data: players } = await admin.from('table_players').select('*').eq('table_id', tableId);
   for (const p of players ?? []) {
@@ -303,6 +329,9 @@ async function leave(st: Stored, t: Record<string, unknown>, uid: string) {
   st.game.players[pi].isBot = true;
   if (st.meta.pendingAsk?.prev === pi) resolveAsk(st, false);
   await admin.from('table_players').update({ is_bot: true, bot_reason: 'disconnected', left_at: new Date().toISOString() }).eq('table_id', String(t.id)).eq('seat', pi);
+  if (st.meta.vsBots || !st.meta.seats.some((x) => x.userId && !x.left)) {
+    await admin.from('game_tables').update({ status: 'abandoned', finished_at: new Date().toISOString() }).eq('id', String(t.id)).eq('status', 'playing');
+  }
   return { ok: true };
 }
 
@@ -311,7 +340,7 @@ async function leave(st: Stored, t: Record<string, unknown>, uid: string) {
 async function writeViews(tableId: string, st: Stored, version: number) {
   const rows = st.meta.seats.map((s, i) => ({ s, i })).filter(({ s }) => s.userId).map(({ s, i }) => ({
     table_id: tableId, user_id: s.userId, version, updated_at: new Date().toISOString(),
-    view: { ...viewFor(st.game, i), meta: { tableId, seat: i, seats: st.meta.seats.map((x) => ({ name: x.name, isBot: x.isBot, left: x.left })), pendingAsk: st.meta.pendingAsk, vsBots: st.meta.vsBots, handOverAt: st.meta.handOverAt } },
+    view: { ...viewFor(st.game, i), meta: { tableId, seat: i, seats: st.meta.seats.map((x) => ({ name: x.name, isBot: x.isBot, left: x.left })), pendingAsk: st.meta.pendingAsk, vsBots: st.meta.vsBots, handOverAt: st.meta.handOverAt, turnStartedAt: st.meta.turnStartedAt ?? null, serverNow: Date.now() } },
   }));
   if (rows.length) await admin.from('player_views').upsert(rows);
 }

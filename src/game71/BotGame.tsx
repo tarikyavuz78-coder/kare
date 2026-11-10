@@ -65,6 +65,20 @@ export default function BotGame({ playerName, players, onExit, onGameEnd }: Prop
     if (s.phase === 'gameOver' && !reported.current) { reported.current = true; onGameEnd?.(s.winner === 0); }
   }, [s.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // süre doldu: desteden çek, en soldaki kartı at
+  const timeout = (cardId: string | null) => {
+    try {
+      let n = s;
+      if (n.turn.taken) n = apply(n, 0, { type: 'undoTake' });
+      if (n.turn.phase === 'draw') n = apply(n, 0, { type: 'draw' });
+      const hand = n.players[0].hand;
+      const id = cardId && hand.some((c) => c.id === cardId) ? cardId : hand[0].id;
+      n = apply(n, 0, { type: 'discard', cardId: id });
+      setS(n);
+      say('Süre doldu: desteden kart çekildi ve en soldaki kart atıldı.');
+    } catch (e) { if (e instanceof RuleError) say(e.message); else throw e; }
+  };
+
   const takeRequest = () => {
     const chk = checkTake(s, 0);
     if (!chk.allowed) { say(chk.reason!); return; }
@@ -83,7 +97,7 @@ export default function BotGame({ playerName, players, onExit, onGameEnd }: Prop
 
   return (
     <>
-      <Table71 s={s} me={0} act={(a) => act(a)} takeRequest={takeRequest} onExit={onExit} title="Bota karşı"
+      <Table71 s={s} me={0} act={(a) => act(a)} takeRequest={takeRequest} onExit={onExit} title="Bota karşı" onTimeout={timeout} paused={!!ask || takeCift} leaveText="Oyundan ayrılırsan bu oyun biter."
         onNewGame={() => { reported.current = false; setS(newGame()); }}
         waitingText={s.phase === 'playing' && s.current !== 0 ? `${s.players[s.current].name} oynuyor…` : null} />
       {ask && (

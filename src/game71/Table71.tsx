@@ -22,6 +22,11 @@ interface Props {
   headerExtra?: ReactNode;
   sideExtra?: ReactNode;
   waitingText?: string | null;
+  /** Süre dolunca çağrılır: en soldaki kartın kimliği. */
+  onTimeout?: (cardId: string | null) => void;
+  turnStartedAt?: number | null;
+  paused?: boolean;
+  leaveText?: string;
 }
 
 type DragSrc = { kind: 'rack'; id: string } | { kind: 'deck' } | { kind: 'pile' };
@@ -82,7 +87,7 @@ function autoCift(hand: C[]): RackSlots {
   return layoutGroups(groups, sortIds(hand.filter((c) => !used.has(c.id))));
 }
 
-export default function Table71({ s, me, act, takeRequest, onExit, title, canAdvance = true, onNewGame, headerExtra, sideExtra, waitingText }: Props) {
+export default function Table71({ s, me, act, takeRequest, onExit, title, canAdvance = true, onNewGame, headerExtra, sideExtra, waitingText, onTimeout, turnStartedAt, paused, leaveText }: Props) {
   const mine = s.players[me];
   const compact = useCompact();
   const n = s.players.length;
@@ -95,7 +100,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => undefined);
-    return () => { ScreenOrientation.unlock().catch(() => undefined); };
+    return () => { ScreenOrientation.lock({ orientation: 'portrait' }).catch(() => undefined); window.scrollTo(0, 0); };
   }, []);
 
   const [rack, setRack] = useState<RackSlots>(() => autoSeri(mine.hand));
@@ -105,6 +110,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const [drag, setDrag] = useState<{ src: DragSrc; card: C | null; x: number; y: number } | null>(null);
   const pending = useRef<{ src: DragSrc; card: C | null; x0: number; y0: number; moved: boolean } | null>(null);
   const [ciftAsk, setCiftAsk] = useState(false);
+  const [leaveAsk, setLeaveAsk] = useState(false);
   const handRef = useRef<HTMLDivElement>(null);
   const width = useWidth(handRef);
 
@@ -144,6 +150,30 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   const rightTop = pileTop(s, me);
   const lastDiscard = s.discard[s.discard.length - 1];
   const canTake = canDraw && !!leftTop && s.discardBy === prev && lastDiscard?.id === leftTop.id && !s.deadJoker;
+  const meldW = compact ? 28 : 44;
+  const meldOverlap = Math.round(meldW * 0.45);
+
+  // ---------------------------------------------------------------- 15 saniyelik hamle süresi
+  const TURN_MS = 15000;
+  const [localStart, setLocalStart] = useState(() => Date.now());
+  useEffect(() => { setLocalStart(Date.now()); }, [s.current, s.handNo, s.phase]);
+  const start = turnStartedAt ?? localStart;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (s.phase !== 'playing') return;
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [s.phase]);
+  const secondsLeft = Math.max(0, Math.ceil((TURN_MS - (now - start)) / 1000));
+  const firedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!onTimeout || !myTurn || paused || drag || now - start < TURN_MS || firedRef.current === start) return;
+    firedRef.current = start;
+    const leftmost = rack.find((id) => !!id && id !== s.turn.taken && byId.has(id)) ?? null;
+    setSelId(null);
+    onTimeout(leftmost);
+  }, [now]); // eslint-disable-line react-hooks/exhaustive-deps
+  const askLeave = () => (s.phase === 'gameOver' ? onExit() : setLeaveAsk(true));
 
   // ---------------------------------------------------------------- hamleler
   const draw = () => act({ type: 'draw' });
@@ -248,6 +278,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
               <div className="row" style={{ gap: 4 }}><StatusChips p={p} /></div>
             </div>
             <span className="muted" style={{ fontSize: 12 }}>{handCount(p)} kart</span>
+            {s.current === i && s.phase === 'playing' && turnStartedAt != null && <span className="chip chip-turn">{secondsLeft} sn</span>}
             {!compact && top && i !== prev && <div title="Son attığı kart"><CardFace card={top} w={30} /></div>}
           </div>
         );
@@ -299,7 +330,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
       <div className="rotate-hint">Oynamak için telefonunuzu yatay çevirin.</div>
       <header className="topbar">
         <div className="row" style={{ flexWrap: 'nowrap' }}>
-          <button className="logo" onClick={onExit} aria-label="Masadan çık" style={{ border: 'none' }}>71</button>
+          <button className="logo" onClick={askLeave} aria-label="Oyundan ayrıl" style={{ border: 'none' }}>71</button>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <strong style={{ fontFamily: 'Sora' }}>El {s.handNo}/{s.targetHands}</strong>
             {!compact && <span className="muted" style={{ fontSize: 12 }}>{title}</span>}
@@ -309,6 +340,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
         <div className="row" style={{ flexWrap: 'nowrap' }}>
           {!compact && <span className="muted" style={{ fontSize: 12 }}>Baraj: {th.normal} puan · {th.pairs} çift</span>}
           {headerExtra}
+          <button className="btn btn-ghost leave-btn" onClick={askLeave}>Oyundan Ayrıl</button>
         </div>
       </header>
 
@@ -319,23 +351,25 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
           <section className="table" aria-label="Masa">
             <div className="melds">
               {ownersWithMelds.length === 0 && <span className="muted" style={{ margin: 'auto' }}>Henüz kimse açmadı.</span>}
-              {ownersWithMelds.map(({ p, i, melds }) => (
-                <div key={i}>
-                  <div className="meld-owner">{i === me ? 'Senin perlerin' : p.name}</div>
-                  <div className="meld-row">
+              <div className="meld-flow">
+                {ownersWithMelds.map(({ p, i, melds }) => (
+                  <Fragment key={i}>
+                    <span className="meld-owner">{i === me ? 'Sen' : p.name}</span>
                     {melds.map((m) => {
                       const t = targetFor(m);
                       return (
                         <div key={m.id} className={`meld ${t ? 'target' : ''}`} data-drop="meld" data-meld={m.id}
                           onClick={t && selId ? () => playOnMeld(m.id, selId) : undefined}
                           role={t && selId ? 'button' : undefined} aria-label={t && selId ? 'Seçili kartı buraya işle' : undefined}>
-                          {m.cards.map((c) => <CardFace key={c.id} card={c} size={compact ? 'xs' : 's'} />)}
+                          {m.cards.map((c, k) => (
+                            <div key={c.id} style={{ marginLeft: k ? -meldOverlap : 0 }}><CardFace card={c} w={meldW} /></div>
+                          ))}
                         </div>
                       );
                     })}
-                  </div>
-                </div>
-              ))}
+                  </Fragment>
+                ))}
+              </div>
             </div>
             <div className={`deck ${canDraw ? 'hot' : ''}`} role="button" tabIndex={canDraw ? 0 : -1} aria-label="Desteden kart çek"
               onPointerDown={canDraw ? begin({ kind: 'deck' }, null) : undefined} onKeyDown={onKey({ kind: 'deck' })}>
@@ -347,7 +381,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
           <div className="hand-area" ref={handRef}>
             <div className="hand-bar">
               <div className="row" style={{ gap: 8 }}>
-                {myTurn && <span className="chip chip-turn">Sıra sende</span>}
+                {myTurn && <span className={`chip chip-turn ${onTimeout && secondsLeft <= 5 ? 'urgent' : ''}`}>Sıra sende{onTimeout ? ` · ${secondsLeft} sn` : ''}</span>}
                 <StatusChips p={mine} />
                 {waitingText && <span className="muted" style={{ fontSize: 13 }}>{waitingText}</span>}
               </div>
@@ -428,6 +462,10 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
         </div>
       )}
 
+      {leaveAsk && (
+        <ConfirmBox title="Oyundan ayrıl" text={leaveText ?? 'Oyundan ayrılırsan bu oyun senin için biter.'}
+          yes="Ayrıl" onYes={() => { setLeaveAsk(false); onExit(); }} onNo={() => setLeaveAsk(false)} />
+      )}
       {ciftAsk && (
         <ConfirmBox title="Çifte Git" text="Bu el yalnızca çiftle açabilirsin ve bu karar el bitene kadar geri alınamaz."
           yes="Çifte Git" onYes={() => { setCiftAsk(false); act({ type: 'declareCift' }); }} onNo={() => setCiftAsk(false)} />

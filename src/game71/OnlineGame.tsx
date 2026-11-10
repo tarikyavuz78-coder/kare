@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth';
 import { Action } from '../engine/game';
 import Table71, { ConfirmBox, TableView } from './Table71';
 
-interface Meta { tableId: string; seat: number; seats: { name: string; isBot: boolean; left: boolean }[]; pendingAsk: { prev: number; taker: number; deadline: number } | null; vsBots: boolean; }
+interface Meta { tableId: string; seat: number; seats: { name: string; isBot: boolean; left: boolean }[]; pendingAsk: { prev: number; taker: number; deadline: number } | null; vsBots: boolean; turnStartedAt?: number | null; serverNow?: number; }
 type View = TableView & { meta: Meta };
 
 export async function callGame<T = Record<string, unknown>>(body: Record<string, unknown>): Promise<T> {
@@ -25,7 +25,7 @@ export default function OnlineGame({ tableId, onExit }: { tableId: string; onExi
   const [view, setView] = useState<View | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [takeCift, setTakeCift] = useState(false);
-  const [leaveAsk, setLeaveAsk] = useState(false);
+  const [recvAt, setRecvAt] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [table, setTable] = useState<{ status: string; seats: number; created_at: string } | null>(null);
   const [seated, setSeated] = useState<{ seat: number; user: { username: string } | null; is_bot: boolean }[]>([]);
@@ -43,7 +43,7 @@ export default function OnlineGame({ tableId, onExit }: { tableId: string; onExi
     if (!profile) return;
     const loadView = async () => {
       const { data } = await supabase.from('player_views').select('view, version').eq('table_id', tableId).eq('user_id', profile.id).maybeSingle();
-      if (data && data.version >= lastVersion.current) { lastVersion.current = data.version; setView(data.view as View); }
+      if (data && data.version >= lastVersion.current) { lastVersion.current = data.version; setView(data.view as View); setRecvAt(Date.now()); }
     };
     const loadTable = async () => {
       const { data: t } = await supabase.from('game_tables').select('status, seats, created_at').eq('id', tableId).single();
@@ -59,7 +59,7 @@ export default function OnlineGame({ tableId, onExit }: { tableId: string; onExi
     const ch = supabase.channel(`masa-${tableId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'player_views', filter: `user_id=eq.${profile.id}` }, (p) => {
         const row = p.new as { table_id: string; view: View; version: number };
-        if (row.table_id === tableId && row.version >= lastVersion.current) { lastVersion.current = row.version; setView(row.view); }
+        if (row.table_id === tableId && row.version >= lastVersion.current) { lastVersion.current = row.version; setView(row.view); setRecvAt(Date.now()); }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'table_players', filter: `table_id=eq.${tableId}` }, loadTable)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_tables', filter: `id=eq.${tableId}` }, () => { loadTable(); refresh(); })
@@ -129,11 +129,14 @@ export default function OnlineGame({ tableId, onExit }: { tableId: string; onExi
   const me = view.meta.seat;
   const ask = view.meta.pendingAsk;
   const askLeft = ask ? Math.max(0, Math.ceil((ask.deadline - now) / 1000)) : 0;
+  const turnStart = view.meta.turnStartedAt && view.meta.serverNow ? recvAt - (view.meta.serverNow - view.meta.turnStartedAt) : null;
   return (
     <>
       <Table71 s={view} me={me} act={act} takeRequest={takeRequest} title={view.meta.vsBots ? 'Bota karşı' : 'Online masa'}
-        onExit={() => (view.phase === 'gameOver' ? onExit() : setLeaveAsk(true))}
+        onExit={async () => { if (view.phase !== 'gameOver') await call({ op: 'leave' }); onExit(); }}
         canAdvance={view.meta.vsBots}
+        leaveText="Ayrılırsan giriş çipini kaybedersin ve bu oyuna geri dönemezsin."
+        onTimeout={(cardId) => { call({ op: 'timeout', cardId }); }} turnStartedAt={turnStart} paused={!!ask}
         headerExtra={<span className="chips-badge">{profile?.chips.toLocaleString('tr-TR')} çip</span>}
         sideExtra={view.meta.vsBots ? undefined : chatBox}
         waitingText={ask && ask.prev !== me ? `${view.players[ask.prev].name} cevap veriyor… (${askLeft})` : view.phase === 'playing' && view.current !== me ? `${view.players[view.current].name} oynuyor…` : null} />
@@ -152,10 +155,6 @@ export default function OnlineGame({ tableId, onExit }: { tableId: string; onExi
       {takeCift && (
         <ConfirmBox title="Çifte Git" text="Önceki oyuncu Çifte Git dedi. Kartı almak için sen de Çifte Git demelisin. Bu el yalnızca çiftle açabilirsin."
           yes="Çifte Git ve al" onYes={() => { setTakeCift(false); call({ op: 'take', declareCift: true }); }} onNo={() => setTakeCift(false)} />
-      )}
-      {leaveAsk && (
-        <ConfirmBox title="Masadan ayrıl" text="Oyun sürerken ayrılırsan giriş çipini kaybedersin ve yerine bot oynar."
-          yes="Ayrıl" onYes={async () => { setLeaveAsk(false); await call({ op: 'leave' }); onExit(); }} onNo={() => setLeaveAsk(false)} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </>

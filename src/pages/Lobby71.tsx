@@ -22,7 +22,7 @@ export default function Lobby71() {
     const sel = 'id, seats, status, is_private, vs_bots, host:profiles!game_tables_host_id_fkey(username), players:table_players(user_id, is_bot)';
     const [o, m, i] = await Promise.all([
       supabase.from('game_tables').select(sel).eq('status', 'waiting').eq('is_private', false).order('created_at', { ascending: false }).limit(30),
-      supabase.from('game_tables').select(sel + ', me:table_players!inner(user_id)').in('status', ['waiting', 'playing']).eq('me.user_id', profile.id).order('created_at', { ascending: false }),
+      supabase.from('game_tables').select(sel + ', me:table_players!inner(user_id, left_at)').in('status', ['waiting', 'playing']).eq('me.user_id', profile.id).is('me.left_at', null).order('created_at', { ascending: false }),
       supabase.from('table_invites').select('table_id, inviter:profiles!table_invites_inviter_id_fkey(username)').eq('invitee_id', profile.id),
     ]);
     setOpen((o.data ?? []) as unknown as TableRow[]);
