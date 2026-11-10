@@ -36,6 +36,8 @@ export interface Turn {
   actedSinceTake: boolean;
   /** Alma geri alındıysa bu tur yeniden yerden alınamaz. */
   noTake?: boolean;
+  /** Bu tur desteden çekilen kart. */
+  drawn?: string;
   /** Yerden almadan önceki masa durumu: almayı geri al, turdaki her şeyi geri alır. */
   snapshot?: Snapshot;
 }
@@ -65,6 +67,8 @@ export interface GameState {
   nextMeldId: number;
   /** Atılan her kartın sahibi (discard ile aynı sırada): her oyuncunun önündeki yığın. */
   discardOwners?: number[];
+  /** Her yeni turda bir artar (süre sayacı bununla sıfırlanır). */
+  turnNo?: number;
   current: number;
   turn: Turn;
   phase: 'playing' | 'handOver' | 'gameOver';
@@ -218,6 +222,7 @@ function startHand(s: GameState, starter: number) {
   }
   s.discard = []; s.discardOwners = []; s.discardBy = null; s.deadJoker = false; s.melds = [];
   s.current = starter;
+  s.turnNo = (s.turnNo ?? 0) + 1;
   s.turn = { phase: 'draw', taken: null, takenMustOpen: false, takenMustUse: false, actedSinceTake: false };
   s.phase = 'playing';
   s.log.push(`${s.handNo}. el başladı. ${s.players[starter].name} başlıyor.`);
@@ -276,6 +281,7 @@ function doDraw(s: GameState, pi: number): GameState {
   if (!c) fail('Deste bitti.');
   s.players[pi].hand.push(c);
   s.turn.phase = 'play';
+  s.turn.drawn = c.id;
   return s;
 }
 
@@ -472,6 +478,7 @@ function doDiscard(s: GameState, pi: number, cardId: string): GameState {
     return s;
   }
   s.current = (pi + 1) % s.players.length;
+  s.turnNo = (s.turnNo ?? 0) + 1;
   s.turn = { phase: 'draw', taken: null, takenMustOpen: false, takenMustUse: false, actedSinceTake: false };
   return s;
 }

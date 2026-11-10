@@ -22,7 +22,7 @@ const BOT_NAMES = ['Ayşe', 'Mehmet', 'Zeynep', 'Can'];
 interface Seat { userId: string | null; name: string; isBot: boolean; left: boolean; }
 interface Meta { seats: Seat[]; pendingAsk: { prev: number; taker: number; deadline: number } | null; handOverAt: number | null; vsBots: boolean; turnStartedAt?: number; }
 const TURN_MS = Number(Deno.env.get('TURN_MS') ?? 60_000);
-const turnKey = (g: GameState) => `${g.handNo}:${g.current}:${g.phase}`;
+const turnKey = (g: GameState) => `${g.handNo}:${g.turnNo ?? 0}:${g.current}:${g.phase}`;
 interface Stored { game: GameState; meta: Meta; }
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
@@ -278,13 +278,14 @@ function runBots(st: Stored) {
   }
 }
 
-/** Süre dolunca: yerden alma geri alınır, desteden çekilir, en soldaki kart (yoksa ilk kart) atılır. */
+/** Süre dolunca: yerden alma geri alınır, desteden çekilir ve çekilen kart atılır. */
 function autoMove(st: Stored, pi: number, cardId: string | null) {
   if (st.game.phase !== 'playing' || st.game.current !== pi || st.meta.pendingAsk) return;
   if (st.game.turn.taken) st.game = apply(st.game, pi, { type: 'undoTake' });
   if (st.game.turn.phase === 'draw') st.game = apply(st.game, pi, { type: 'draw' });
   const hand = st.game.players[pi].hand;
-  const id = cardId && hand.some((c) => c.id === cardId) ? cardId : hand[0].id;
+  const drawn = st.game.turn.drawn;
+  const id = drawn && hand.some((c) => c.id === drawn) ? drawn : cardId && hand.some((c) => c.id === cardId) ? cardId : hand[0].id;
   st.game = apply(st.game, pi, { type: 'discard', cardId: id });
 }
 

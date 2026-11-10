@@ -51,3 +51,18 @@ describe('ıstaka', () => {
     expect(s.discardOwners).toEqual([p]);
   });
 });
+
+describe('hamle süresi', () => {
+  it('her yeni turda tur numarası artar, çekilen kart kaydedilir', () => {
+    let s = createGame(['A', 'B'], { seed: 5 });
+    const t0 = s.turnNo!;
+    const p = s.current;
+    s = apply(s, p, { type: 'draw' });
+    expect(s.turnNo).toBe(t0);
+    const drawn = s.turn.drawn!;
+    expect(s.players[p].hand.some((c) => c.id === drawn)).toBe(true);
+    s = apply(s, p, { type: 'discard', cardId: drawn });
+    expect(s.turnNo).toBe(t0 + 1);
+    expect(s.turn.drawn).toBeUndefined();
+  });
+});

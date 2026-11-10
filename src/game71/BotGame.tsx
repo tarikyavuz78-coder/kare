@@ -72,10 +72,11 @@ export default function BotGame({ playerName, players, onExit, onGameEnd }: Prop
       if (n.turn.taken) n = apply(n, 0, { type: 'undoTake' });
       if (n.turn.phase === 'draw') n = apply(n, 0, { type: 'draw' });
       const hand = n.players[0].hand;
-      const id = cardId && hand.some((c) => c.id === cardId) ? cardId : hand[0].id;
+      const drawn = n.turn.drawn;
+      const id = drawn && hand.some((c) => c.id === drawn) ? drawn : cardId && hand.some((c) => c.id === cardId) ? cardId : hand[0].id;
       n = apply(n, 0, { type: 'discard', cardId: id });
       setS(n);
-      say('Süre doldu: desteden kart çekildi ve en soldaki kart atıldı.');
+      say('Süre doldu: desteden kart çekildi ve çekilen kart atıldı.');
     } catch (e) { if (e instanceof RuleError) say(e.message); else throw e; }
   };
 

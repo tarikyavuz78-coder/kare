@@ -147,7 +147,7 @@ export default function Table71({ s, me, act, takeRequest, onExit, title, canAdv
   // ---------------------------------------------------------------- 15 saniyelik hamle süresi
   const TURN_MS = 60000;
   const [localStart, setLocalStart] = useState(() => Date.now());
-  useEffect(() => { setLocalStart(Date.now()); }, [s.current, s.handNo, s.phase]);
+  useEffect(() => { setLocalStart(Date.now()); }, [s.turnNo, s.current, s.handNo, s.phase]);
   const start = turnStartedAt ?? localStart;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
